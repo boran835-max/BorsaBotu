@@ -2,7 +2,7 @@ name: Borsa Botu Public
 
 on:
   schedule:
-    - cron: '*/15 * * * *'  # Her 15 dakikada bir (Public'te sınır yok!)
+    - cron: '*/5 * * * *'  # Her 15 dakikada bir (Public'te sınır yok!)
   workflow_dispatch:
 
 permissions:
