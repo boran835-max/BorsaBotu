@@ -1,0 +1,8 @@
+yfinance
+selenium
+webdriver-manager
+beautifulsoup4
+rich
+google-generativeai
+python-dotenv
+requests
