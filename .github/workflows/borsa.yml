@@ -1,0 +1,40 @@
+name: Borsa Botu Public
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'  # Her 15 dakikada bir (Public'te sınır yok!)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  calistir:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Kodları Çek
+        uses: actions/checkout@v3
+
+      - name: Python Kur
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Kütüphaneleri Yükle
+        run: pip install -r requirements.txt
+
+      - name: Botu Başlat
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
+
+      - name: Hafızayı Kaydet
+        run: |
+          git config --global user.name 'GitHub Action Bot'
+          git config --global user.email 'action@github.com'
+          git add hafiza.json || true
+          git commit -m "Hafıza güncellendi" || exit 0
+          git push
