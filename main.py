@@ -12,12 +12,9 @@ from notifier import TelegramBot
 # ⚙️ AYARLAR
 # ==============================================================================
 HAFIZA_DOSYASI = "hafiza.json"
-ESIK_DEGERI = 0.8  # %0.8 hareket olunca haber ver
-SPAM_SURESI = 14400 # 4 Saat
+ESIK_DEGERI = 0.8  # Her %0.8'lik harekette yeni mesaj gelir.
+# SPAM_SURESI'ni kaldırdık! Artık zaman değil, fiyat konuşur.
 
-# ==============================================================================
-# 🛡️ STRATEJİ LİSTESİ
-# ==============================================================================
 STRATEJI_MAP = {
     "GC=F": {"Ad": "Altın",      "ETF": "GLD"},
     "SI=F": {"Ad": "Gümüş",      "ETF": "SLV"},
@@ -34,7 +31,6 @@ STRATEJI_MAP = {
 bot = TelegramBot()
 ai = AITrader()
 
-# --- HAFIZA YÖNETİMİ ---
 def hafiza_yukle():
     if os.path.exists(HAFIZA_DOSYASI):
         try:
@@ -48,10 +44,10 @@ def hafiza_kaydet(veri):
         json.dump(veri, f)
 
 def fiyat_getir(sembol):
-    """Sadece anlık fiyatı getirir."""
     try:
         ticker = yf.Ticker(sembol)
-        data = ticker.history(period="1d")
+        # 5 Günlük veri (Garanti olsun diye)
+        data = ticker.history(period="5d")
         if data.empty: return None
         return data['Close'].iloc[-1]
     except: return None
@@ -71,50 +67,42 @@ def rsi_hesapla(sembol):
     except: return 50
 
 def main():
-    print("🌍 Bot Başlatıldı (İlk Çalışmada %5 Hileli Mod)...")
+    print("🌍 Bot Başlatıldı (Ralli Dostu Mod - Zaman Sınırı YOK)...")
     
     hafiza = hafiza_yukle()
     yeni_hafiza = hafiza.copy()
     degisiklik_var_mi = False
-    su_an = time.time()
+    
+    # Şu anki zamanı sadece log için tutuyoruz, kısıtlama için değil
+    su_an = time.time() 
 
     for kaynak_kodu, detay in STRATEJI_MAP.items():
-        # 1. Anlık Fiyatı Çek
         guncel_fiyat = fiyat_getir(kaynak_kodu)
-        if guncel_fiyat is None: continue
+        if guncel_fiyat is None: 
+            print(f"⚠️ Veri yok: {kaynak_kodu}")
+            continue
 
-        # 2. Hafızayı Kontrol Et
         eski_veri = hafiza.get(kaynak_kodu, {})
         eski_fiyat = eski_veri.get("son_fiyat")
 
-        # 😈 HİLE BÖLÜMÜ: Eğer hafızada kayıt yoksa (İlk çalışmaysa)
+        # 😈 HİLE MODU (Test İçin):
+        # Hafızada kayıt yoksa, eski fiyatı %5 düşük farz et ki mesaj atsın.
         if eski_fiyat is None:
-            # Botu kandırıyoruz: "Eski fiyat %5 düşüktü" diyoruz.
             eski_fiyat = guncel_fiyat * 0.95 
-            # Spam süresini de 0 yapıyoruz ki takılmasın
-            eski_veri = {"son_fiyat": eski_fiyat, "son_mesaj_zamani": 0}
-            print(f"😈 Hile yapıldı: {kaynak_kodu} için eski fiyat %5 düşük varsayıldı.")
+            eski_veri = {"son_fiyat": eski_fiyat} 
+            print(f"😈 İlk Çalışma Hilesi: {kaynak_kodu}")
 
-        # 3. Kıyaslama
+        # Hesaplama
         degisim_yuzdesi = ((guncel_fiyat - eski_fiyat) / eski_fiyat) * 100
-        
-        print(f"🔍 {kaynak_kodu}: Eski={eski_fiyat:.2f}, Yeni={guncel_fiyat:.2f}, Fark=%{degisim_yuzdesi:.2f}")
+        print(f"🔍 {kaynak_kodu}: Fark=%{degisim_yuzdesi:.2f}")
 
-        # 4. Karar Anı
+        # 🔥 KARAR ANI: Sadece Fiyata Bakıyoruz! Zaman kuralı YOK.
         if abs(degisim_yuzdesi) >= ESIK_DEGERI:
             
-            # Spam Kontrolü
-            son_mesaj_zamani = eski_veri.get("son_mesaj_zamani", 0)
-            if (su_an - son_mesaj_zamani) < SPAM_SURESI:
-                print(f"🛑 Süre dolmadı: {kaynak_kodu}")
-                continue
-
-            # Mesaj At!
             etf_kodu = detay["ETF"]
             etf_fiyat = fiyat_getir(etf_kodu)
             etf_rsi = rsi_hesapla(etf_kodu)
             
-            # AI Paketi
             paket = {
                 "tur": "HISSE", 
                 "emtia_adi": f"{detay['Ad']}",
@@ -126,15 +114,14 @@ def main():
                 "trend": "YÜKSELİŞ" if degisim_yuzdesi > 0 else "DÜŞÜŞ"
             }
             
-            try:
-                ai_sonuc = ai.yorumla(paket)
+            try: ai_sonuc = ai.yorumla(paket)
             except: ai_sonuc = ".."
 
-            baslik_ikon = "🚨 GÜÇLÜ SİNYAL" if abs(degisim_yuzdesi) > 1.5 else "🔔 SİNYAL"
+            baslik_ikon = "🚨 RALLİ/ÇÖKÜŞ" if abs(degisim_yuzdesi) > 2.0 else "🔔 HAREKET"
             
             mesaj = (
-                f"<b>{baslik_ikon}: {detay['Ad']} Hareketlendi!</b>\n\n"
-                f"📊 <b>Değişim:</b> %{paket['emtia_degisim']}\n"
+                f"<b>{baslik_ikon}: {detay['Ad']} Durmuyor!</b>\n\n"
+                f"📊 <b>Son Değişim:</b> %{paket['emtia_degisim']}\n"
                 f"💵 <b>Fiyat:</b> {guncel_fiyat:.2f}\n"
                 f"💰 <b>ETF:</b> {etf_kodu} ({paket['fiyat']}$)\n"
                 f"------------------------\n"
@@ -145,14 +132,21 @@ def main():
             bot.gonder(mesaj)
             print(f"✅ MESAJ ATILDI: {kaynak_kodu}")
             
-            # Hileyi gerçeğe çevir: Artık GÜNCEL fiyatı hafızaya yazıyoruz.
+            # ✅ KRİTİK NOKTA: Mesaj attığımız için referans fiyatı GÜNCELLİYORUZ.
+            # Artık yeni %0.8'lik hareket bu fiyata göre hesaplanacak.
             yeni_hafiza[kaynak_kodu] = {"son_fiyat": guncel_fiyat, "son_mesaj_zamani": su_an}
             degisiklik_var_mi = True
         
         else:
-            # Değişim azsa sadece fiyatı güncelle (Hile modunda buraya düşmez ama olsun)
-            yeni_hafiza[kaynak_kodu] = {"son_fiyat": guncel_fiyat, "son_mesaj_zamani": eski_veri.get("son_mesaj_zamani", 0)}
-            degisiklik_var_mi = True
+            # Hareket küçükse (%0.8 altı), eski referans fiyatı KORU.
+            # Böylece gıdım gıdım artışları kaçırmayız.
+            yeni_hafiza[kaynak_kodu] = eski_veri # Değişiklik yok
+            
+            # (Teknik detay: Eğer eski_veri boşsa, yani ilk çalışmada %0.8 altı kaldıysa
+            # o zaman kaydetmeliyiz ki bir dahakine referans olsun)
+            if eski_fiyat is None: # Bu blok hile modu olduğu için pek çalışmaz ama güvenlik olsun.
+                 yeni_hafiza[kaynak_kodu] = {"son_fiyat": guncel_fiyat, "son_mesaj_zamani": su_an}
+                 degisiklik_var_mi = True
 
     if degisiklik_var_mi:
         hafiza_kaydet(yeni_hafiza)
