@@ -12,8 +12,8 @@ from notifier import TelegramBot
 # ⚙️ AYARLAR
 # ==============================================================================
 HAFIZA_DOSYASI = "hafiza.json"
-ESIK_DEGERI = 0.8  # Yüzde kaç değişimde mesaj atsın?
-SPAM_SURESI = 14400 # 4 Saat (Aynı yönde sürekli mesaj atmaması için)
+ESIK_DEGERI = 0.8  # %0.8 hareket olunca haber ver
+SPAM_SURESI = 14400 # 4 Saat
 
 # ==============================================================================
 # 🛡️ STRATEJİ LİSTESİ
@@ -48,20 +48,18 @@ def hafiza_kaydet(veri):
         json.dump(veri, f)
 
 def fiyat_getir(sembol):
-    """Sadece anlık fiyatı getirir, geçmişe bakmaz."""
+    """Sadece anlık fiyatı getirir."""
     try:
         ticker = yf.Ticker(sembol)
-        # Sadece son anlık fiyatı istiyoruz
         data = ticker.history(period="1d")
         if data.empty: return None
         return data['Close'].iloc[-1]
     except: return None
 
 def rsi_hesapla(sembol):
-    """RSI için yine de biraz geçmiş veriye ihtiyacımız var (Yorum için)"""
     try:
         ticker = yf.Ticker(sembol)
-        hist = ticker.history(period="1mo") # RSI için 1 ay yeterli
+        hist = ticker.history(period="1mo")
         if len(hist) > 14:
             delta = hist['Close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(14).mean()
@@ -73,9 +71,8 @@ def rsi_hesapla(sembol):
     except: return 50
 
 def main():
-    print("🌍 Bot Başlatıldı (Kendi Hafızasıyla Kıyaslayan Mod)...")
+    print("🌍 Bot Başlatıldı (İlk Çalışmada %5 Hileli Mod)...")
     
-    # Hafıza Yapısı: {"GC=F": {"son_fiyat": 2000, "son_mesaj_zamani": 12345678}}
     hafiza = hafiza_yukle()
     yeni_hafiza = hafiza.copy()
     degisiklik_var_mi = False
@@ -86,18 +83,19 @@ def main():
         guncel_fiyat = fiyat_getir(kaynak_kodu)
         if guncel_fiyat is None: continue
 
-        # 2. Hafızada Eski Fiyat Var mı?
+        # 2. Hafızayı Kontrol Et
         eski_veri = hafiza.get(kaynak_kodu, {})
         eski_fiyat = eski_veri.get("son_fiyat")
 
-        # Eğer ilk kez çalışıyorsa (Hafıza yoksa)
+        # 😈 HİLE BÖLÜMÜ: Eğer hafızada kayıt yoksa (İlk çalışmaysa)
         if eski_fiyat is None:
-            print(f"🆕 İlk kayıt: {kaynak_kodu} -> {guncel_fiyat}")
-            yeni_hafiza[kaynak_kodu] = {"son_fiyat": guncel_fiyat, "son_mesaj_zamani": 0}
-            degisiklik_var_mi = True
-            continue # İlk turda mesaj atmaz, sadece kaydeder
+            # Botu kandırıyoruz: "Eski fiyat %5 düşüktü" diyoruz.
+            eski_fiyat = guncel_fiyat * 0.95 
+            # Spam süresini de 0 yapıyoruz ki takılmasın
+            eski_veri = {"son_fiyat": eski_fiyat, "son_mesaj_zamani": 0}
+            print(f"😈 Hile yapıldı: {kaynak_kodu} için eski fiyat %5 düşük varsayıldı.")
 
-        # 3. Kıyaslama (Bizim Matematiğimiz)
+        # 3. Kıyaslama
         degisim_yuzdesi = ((guncel_fiyat - eski_fiyat) / eski_fiyat) * 100
         
         print(f"🔍 {kaynak_kodu}: Eski={eski_fiyat:.2f}, Yeni={guncel_fiyat:.2f}, Fark=%{degisim_yuzdesi:.2f}")
@@ -105,12 +103,10 @@ def main():
         # 4. Karar Anı
         if abs(degisim_yuzdesi) >= ESIK_DEGERI:
             
-            # Spam Kontrolü (Zaman Bazlı)
+            # Spam Kontrolü
             son_mesaj_zamani = eski_veri.get("son_mesaj_zamani", 0)
             if (su_an - son_mesaj_zamani) < SPAM_SURESI:
                 print(f"🛑 Süre dolmadı: {kaynak_kodu}")
-                # Fiyatı güncellemeliyiz ki referansımız hep taze kalsın mı? 
-                # HAYIR. Referans mesaj attığımız fiyat olmalı.
                 continue
 
             # Mesaj At!
@@ -121,10 +117,10 @@ def main():
             # AI Paketi
             paket = {
                 "tur": "HISSE", 
-                "emtia_adi": f"{detay['Ad']} (Kendi Takibim)",
+                "emtia_adi": f"{detay['Ad']}",
                 "sembol": etf_kodu,
                 "emtia_degisim": round(degisim_yuzdesi, 2),
-                "hisse_degisim": "---", # Bunu hesaplamadık çünkü ETF'nin eski fiyatını tutmuyoruz
+                "hisse_degisim": "---",
                 "fiyat": round(etf_fiyat, 2) if etf_fiyat else "Veri Yok",
                 "rsi": round(etf_rsi, 0),
                 "trend": "YÜKSELİŞ" if degisim_yuzdesi > 0 else "DÜŞÜŞ"
@@ -138,9 +134,9 @@ def main():
             
             mesaj = (
                 f"<b>{baslik_ikon}: {detay['Ad']} Hareketlendi!</b>\n\n"
-                f"📊 <b>Bizim Tespitimiz:</b> %{paket['emtia_degisim']}\n"
-                f"💵 <b>Eski:</b> {eski_fiyat:.2f} -> <b>Yeni:</b> {guncel_fiyat:.2f}\n"
-                f"💰 <b>İlgili ETF:</b> {etf_kodu} ({paket['fiyat']}$)\n"
+                f"📊 <b>Değişim:</b> %{paket['emtia_degisim']}\n"
+                f"💵 <b>Fiyat:</b> {guncel_fiyat:.2f}\n"
+                f"💰 <b>ETF:</b> {etf_kodu} ({paket['fiyat']}$)\n"
                 f"------------------------\n"
                 f"📈 <b>RSI:</b> {paket['rsi']}\n"
                 f"🤖 <b>AI:</b> {ai_sonuc}"
@@ -149,16 +145,14 @@ def main():
             bot.gonder(mesaj)
             print(f"✅ MESAJ ATILDI: {kaynak_kodu}")
             
-            # Yeni referans noktamız artık bu fiyat oldu
+            # Hileyi gerçeğe çevir: Artık GÜNCEL fiyatı hafızaya yazıyoruz.
             yeni_hafiza[kaynak_kodu] = {"son_fiyat": guncel_fiyat, "son_mesaj_zamani": su_an}
             degisiklik_var_mi = True
         
         else:
-            # Fiyat değişmedi (%0.8 olmadı).
-            # Peki referans fiyatı güncellemeli miyiz?
-            # STRATEJİ: Hayır. Referans fiyat, en son "Oldu!" dediğimiz fiyattır.
-            # Böylece fiyat gıdım gıdım artarsa (%0.2 + %0.2 + %0.2 + %0.2) toplamda %0.8 olunca yakalarız.
-            pass
+            # Değişim azsa sadece fiyatı güncelle (Hile modunda buraya düşmez ama olsun)
+            yeni_hafiza[kaynak_kodu] = {"son_fiyat": guncel_fiyat, "son_mesaj_zamani": eski_veri.get("son_mesaj_zamani", 0)}
+            degisiklik_var_mi = True
 
     if degisiklik_var_mi:
         hafiza_kaydet(yeni_hafiza)
