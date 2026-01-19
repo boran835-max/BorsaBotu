@@ -12,20 +12,38 @@ from notifier import TelegramBot
 # ⚙️ AYARLAR
 # ==============================================================================
 HAFIZA_DOSYASI = "hafiza.json"
-ESIK_DEGERI = 0.8  # Her %0.8'lik harekette yeni mesaj gelir.
-# SPAM_SURESI'ni kaldırdık! Artık zaman değil, fiyat konuşur.
+ESIK_DEGERI = 0.8  # %0.8 hareket olunca haber ver
+# SPAM SÜRESİ YOK! Ralli varsa her adımda mesaj atar.
 
+# ==============================================================================
+# 🛡️ DEV EMTİA LİSTESİ (INVESTING.COM UYUMLU)
+# ==============================================================================
 STRATEJI_MAP = {
+    # --- 🥇 DEĞERLİ METALLER ---
     "GC=F": {"Ad": "Altın",      "ETF": "GLD"},
     "SI=F": {"Ad": "Gümüş",      "ETF": "SLV"},
     "PL=F": {"Ad": "Platin",     "ETF": "PPLT"},
     "PA=F": {"Ad": "Paladyum",   "ETF": "PALL"},
-    "HG=F": {"Ad": "Bakır",      "ETF": "CPER"},
-    "CL=F": {"Ad": "Petrol (WTI)", "ETF": "USO"},
-    "NG=F": {"Ad": "Doğalgaz",     "ETF": "UNG"},
-    "ZW=F": {"Ad": "Buğday",     "ETF": "WEAT"},
+
+    # --- 🏗️ ENDÜSTRİYEL METALLER (Senin İsteklerin) ---
+    "HG=F":  {"Ad": "Bakır",           "ETF": "CPER"},
+    "NI=F":  {"Ad": "Nikel",           "ETF": "NIKL"}, # Nikel ETF'i
+    "ALI=F": {"Ad": "Alüminyum",       "ETF": "AA"},   # JJU kapandığı için Alcoa (AA) hissesini koyduk
+
+    # --- 🛢️ ENERJİ ---
+    "CL=F": {"Ad": "Ham Petrol (WTI)", "ETF": "USO"},
+    "BZ=F": {"Ad": "Brent Petrol",     "ETF": "BNO"},  # Brent eklendi
+    "NG=F": {"Ad": "Doğalgaz",         "ETF": "UNG"},
+    "RB=F": {"Ad": "Benzin",           "ETF": "UGA"},  # Benzin eklendi
+
+    # --- 🌾 TARIM & GIDA (Softs) ---
     "ZC=F": {"Ad": "Mısır",      "ETF": "CORN"},
-    "ZS=F": {"Ad": "Soya",       "ETF": "SOYB"}
+    "ZW=F": {"Ad": "Buğday",     "ETF": "WEAT"},
+    "ZS=F": {"Ad": "Soya",       "ETF": "SOYB"},
+    "KC=F": {"Ad": "Kahve",      "ETF": "JO"},    # Kahve eklendi
+    "SB=F": {"Ad": "Şeker",      "ETF": "CANE"},  # Şeker eklendi
+    "CC=F": {"Ad": "Kakao",      "ETF": "NIB"},   # Kakao eklendi
+    "CT=F": {"Ad": "Pamuk",      "ETF": "BAL"}    # Pamuk eklendi
 }
 
 bot = TelegramBot()
@@ -46,7 +64,7 @@ def hafiza_kaydet(veri):
 def fiyat_getir(sembol):
     try:
         ticker = yf.Ticker(sembol)
-        # 5 Günlük veri (Garanti olsun diye)
+        # 5 Günlük veri çekiyoruz ki "Data Yok" hatası almayalım
         data = ticker.history(period="5d")
         if data.empty: return None
         return data['Close'].iloc[-1]
@@ -67,44 +85,41 @@ def rsi_hesapla(sembol):
     except: return 50
 
 def main():
-    print("🌍 Bot Başlatıldı (Ralli Dostu Mod - Zaman Sınırı YOK)...")
+    print("🌍 Bot Başlatıldı (Dev Kadro & Hileli Mod)...")
     
     hafiza = hafiza_yukle()
     yeni_hafiza = hafiza.copy()
     degisiklik_var_mi = False
-    
-    # Şu anki zamanı sadece log için tutuyoruz, kısıtlama için değil
-    su_an = time.time() 
+    su_an = time.time()
 
     for kaynak_kodu, detay in STRATEJI_MAP.items():
         guncel_fiyat = fiyat_getir(kaynak_kodu)
         if guncel_fiyat is None: 
-            print(f"⚠️ Veri yok: {kaynak_kodu}")
+            # Veri yoksa sessizce geç, logu kirletme
             continue
 
         eski_veri = hafiza.get(kaynak_kodu, {})
         eski_fiyat = eski_veri.get("son_fiyat")
 
-        # 😈 HİLE MODU (Test İçin):
-        # Hafızada kayıt yoksa, eski fiyatı %5 düşük farz et ki mesaj atsın.
+        # 😈 HİLE MODU: İlk kez görüyorsak %5 düşükmüş gibi davran
         if eski_fiyat is None:
             eski_fiyat = guncel_fiyat * 0.95 
-            eski_veri = {"son_fiyat": eski_fiyat} 
-            print(f"😈 İlk Çalışma Hilesi: {kaynak_kodu}")
+            eski_veri = {"son_fiyat": eski_fiyat}
+            print(f"😈 İlk Tanışma Hilesi: {detay['Ad']}")
 
         # Hesaplama
         degisim_yuzdesi = ((guncel_fiyat - eski_fiyat) / eski_fiyat) * 100
-        print(f"🔍 {kaynak_kodu}: Fark=%{degisim_yuzdesi:.2f}")
-
-        # 🔥 KARAR ANI: Sadece Fiyata Bakıyoruz! Zaman kuralı YOK.
+        
+        # Sadece büyük hareketleri ekrana yaz
         if abs(degisim_yuzdesi) >= ESIK_DEGERI:
-            
+            print(f"🔥 {detay['Ad']}: %{degisim_yuzdesi:.2f}")
+
             etf_kodu = detay["ETF"]
             etf_fiyat = fiyat_getir(etf_kodu)
             etf_rsi = rsi_hesapla(etf_kodu)
             
             paket = {
-                "tur": "HISSE", 
+                "tur": "EMTIA", 
                 "emtia_adi": f"{detay['Ad']}",
                 "sembol": etf_kodu,
                 "emtia_degisim": round(degisim_yuzdesi, 2),
@@ -117,36 +132,33 @@ def main():
             try: ai_sonuc = ai.yorumla(paket)
             except: ai_sonuc = ".."
 
-            baslik_ikon = "🚨 RALLİ/ÇÖKÜŞ" if abs(degisim_yuzdesi) > 2.0 else "🔔 HAREKET"
+            baslik_ikon = "🚨 BİLGİLENDİRME" if abs(degisim_yuzdesi) > 2.0 else "🔔 HAREKET"
             
             mesaj = (
-                f"<b>{baslik_ikon}: {detay['Ad']} Durmuyor!</b>\n\n"
-                f"📊 <b>Son Değişim:</b> %{paket['emtia_degisim']}\n"
+                f"<b>{baslik_ikon}: {detay['Ad']} ({kaynak_kodu})</b>\n\n"
+                f"📊 <b>Değişim:</b> %{paket['emtia_degisim']}\n"
                 f"💵 <b>Fiyat:</b> {guncel_fiyat:.2f}\n"
-                f"💰 <b>ETF:</b> {etf_kodu} ({paket['fiyat']}$)\n"
+                f"💰 <b>ETF/Hisse:</b> {etf_kodu} ({paket['fiyat']}$)\n"
                 f"------------------------\n"
                 f"📈 <b>RSI:</b> {paket['rsi']}\n"
                 f"🤖 <b>AI:</b> {ai_sonuc}"
             )
             
             bot.gonder(mesaj)
-            print(f"✅ MESAJ ATILDI: {kaynak_kodu}")
+            print(f"✅ MESAJ ATILDI: {detay['Ad']}")
             
-            # ✅ KRİTİK NOKTA: Mesaj attığımız için referans fiyatı GÜNCELLİYORUZ.
-            # Artık yeni %0.8'lik hareket bu fiyata göre hesaplanacak.
+            # Yeni fiyatı hafızaya yaz (Referans güncelle)
             yeni_hafiza[kaynak_kodu] = {"son_fiyat": guncel_fiyat, "son_mesaj_zamani": su_an}
             degisiklik_var_mi = True
         
         else:
-            # Hareket küçükse (%0.8 altı), eski referans fiyatı KORU.
-            # Böylece gıdım gıdım artışları kaçırmayız.
-            yeni_hafiza[kaynak_kodu] = eski_veri # Değişiklik yok
-            
-            # (Teknik detay: Eğer eski_veri boşsa, yani ilk çalışmada %0.8 altı kaldıysa
-            # o zaman kaydetmeliyiz ki bir dahakine referans olsun)
-            if eski_fiyat is None: # Bu blok hile modu olduğu için pek çalışmaz ama güvenlik olsun.
-                 yeni_hafiza[kaynak_kodu] = {"son_fiyat": guncel_fiyat, "son_mesaj_zamani": su_an}
-                 degisiklik_var_mi = True
+            # Hareket küçükse eski referansı koru
+            if eski_fiyat is not None:
+                yeni_hafiza[kaynak_kodu] = eski_veri
+            else:
+                # Hileli modda buraya düşmez ama yine de güvenli kayıt
+                yeni_hafiza[kaynak_kodu] = {"son_fiyat": guncel_fiyat, "son_mesaj_zamani": su_an}
+                degisiklik_var_mi = True
 
     if degisiklik_var_mi:
         hafiza_kaydet(yeni_hafiza)
