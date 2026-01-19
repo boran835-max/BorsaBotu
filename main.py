@@ -12,12 +12,11 @@ from notifier import TelegramBot
 # ⚙️ AYARLAR
 # ==============================================================================
 HAFIZA_DOSYASI = "hafiza.json"
-SPAM_SURESI = 14400 # 4 Saat
+SPAM_SURESI = 14400 # 4 Saat (Mesaj attıktan sonra 4 saat susar)
 
 # ==============================================================================
-# 🛡️ TAM KADRO STRATEJİ LİSTESİ (VADELİ -> ETF)
+# 🛡️ FİNAL TAM LİSTE (NİKEL DAHİL)
 # ==============================================================================
-# Yahoo'nun engellemediği VADELİ kodları kullanıyoruz. (GC=F, NI=F vb.)
 STRATEJI_MAP = {
     # --- 🥇 DEĞERLİ METALLER ---
     "GC=F": {"Ad": "Altın",      "ETF": "GLD"},
@@ -25,10 +24,9 @@ STRATEJI_MAP = {
     "PL=F": {"Ad": "Platin",     "ETF": "PPLT"},
     "PA=F": {"Ad": "Paladyum",   "ETF": "PALL"},
 
-    # --- 🏗️ ENDÜSTRİYEL METALLER (NİKEL BURADA!) ---
+    # --- 🏗️ ENDÜSTRİYEL ---
     "HG=F": {"Ad": "Bakır",      "ETF": "CPER"},
-    "NI=F": {"Ad": "Nikel",      "ETF": "NIKL"},  # <-- İŞTE BURADA, EKSİKSİZ!
-    "ALI=F": {"Ad": "Alüminyum", "ETF": "JJU"},   # Alüminyumu da ekledim.
+    "NI=F": {"Ad": "Nikel",      "ETF": "NIKL"}, 
 
     # --- 🛢️ ENERJİ ---
     "CL=F": {"Ad": "Petrol (WTI)", "ETF": "USO"},
@@ -59,15 +57,13 @@ def hafiza_kaydet(veri):
 def veri_getir(sembol):
     try:
         ticker = yf.Ticker(sembol)
-        # 1 dakikalık veri yerine 5 günlük standart veri (Daha güvenli, hata vermez)
+        # Hata almamak için 5 günlük standart veri çekiyoruz
         hist = ticker.history(period="5d")
         
         if len(hist) < 2: return None
         
         guncel = hist['Close'].iloc[-1]
         onceki = hist['Close'].iloc[-2]
-        
-        # Değişim Hesabı
         degisim = ((guncel - onceki) / onceki) * 100
         
         # RSI Hesabı
@@ -78,29 +74,24 @@ def veri_getir(sembol):
             rs = gain / loss
             rsi = 100 - (100 / (1 + rs))
             rsi_val = rsi.iloc[-1]
-        else:
-            rsi_val = 50
+        else: rsi_val = 50
 
         return {"fiyat": guncel, "degisim": degisim, "rsi": rsi_val}
     except: return None
 
 def main():
-    print("🌍 GitHub Bot Başlatıldı (Tam Liste)...")
+    print("🌍 Bot Başlatıldı (Hafıza Sıfırlandı, Oto-Kontrol Açık)...")
     
+    # Hafıza dosyasını yüklemeye çalışır, yoksa boş başlar (Sıfırladığımız için boş başlayacak)
     son_bildirimler = hafiza_yukle()
     degisiklik_var_mi = False
     su_an = time.time()
 
     for kaynak_kodu, detay in STRATEJI_MAP.items():
-        # Kaynak verisini çek
         kaynak_veri = veri_getir(kaynak_kodu)
+        if not kaynak_veri: continue
         
-        if not kaynak_veri:
-            # Nikel bazen veri vermezse boşuna beklemesin diye log düşüyoruz
-            # print(f"⚠️ Veri yok: {kaynak_kodu}") 
-            continue
-        
-        # Eğer hareket %0.8'den küçükse pas geç (Filtre burada)
+        # FİLTRE: %0.8 altındaki hareketleri önemseme
         if abs(kaynak_veri["degisim"]) < 0.8: 
             continue
 
@@ -108,11 +99,13 @@ def main():
         etf_veri = veri_getir(etf_kodu)
         if not etf_veri: continue
 
-        # SPAM KONTROLÜ
+        # --- OTO KONTROL (SPAM KORUMASI) ---
+        # Bot hafızaya bakar. Eğer 'hafiza.json' silindiği için liste boşsa
+        # burayı pas geçer ve mesajı GÖNDERİR.
         if etf_kodu in son_bildirimler:
             son_zaman = son_bildirimler[etf_kodu]
             if (su_an - son_zaman) < SPAM_SURESI:
-                print(f"🛑 {etf_kodu} için zaten mesaj atıldı.")
+                print(f"🛑 {etf_kodu} mesajı yakın zamanda atıldı. Pas geçiliyor.")
                 continue
 
         # AI Paketi
@@ -146,16 +139,17 @@ def main():
         )
         
         bot.gonder(mesaj)
-        print(f"✅ Mesaj atıldı: {etf_kodu}")
+        print(f"✅ MESAJ GÖNDERİLDİ: {etf_kodu}")
         
+        # Hafızaya kaydet ki 4 saat boyunca bir daha atmasın
         son_bildirimler[etf_kodu] = su_an
         degisiklik_var_mi = True
 
     if degisiklik_var_mi:
         hafiza_kaydet(son_bildirimler)
-        print("💾 Hafıza dosyası güncellendi.")
+        print("💾 Yeni hafıza dosyası oluşturuldu.")
     else:
-        print("💤 Yeni sinyal yok, piyasa sakin.")
+        print("💤 Hareket yok (%0.8 altı), mesaj atılmadı.")
 
 if __name__ == "__main__":
     main()
