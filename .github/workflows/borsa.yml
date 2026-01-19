@@ -1,8 +1,8 @@
-name: Borsa Botu Public
+name: Wall Street Master Bot
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Her 15 dakikada bir (Public'te sınır yok!)
+    - cron: '*/5 * * * *'  # 5 Dakikada bir
   workflow_dispatch:
 
 permissions:
@@ -16,7 +16,7 @@ jobs:
       - name: Kodları Çek
         uses: actions/checkout@v3
 
-      - name: Python Kur
+      - name: Python Kur (3.10)
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
@@ -37,4 +37,7 @@ jobs:
           git config --global user.email 'action@github.com'
           git add hafiza.json || true
           git commit -m "Hafıza güncellendi" || exit 0
+          # --- İŞTE SİHİRLİ KOMUT BURADA ---
+          git pull --rebase
+          # ---------------------------------
           git push
