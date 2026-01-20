@@ -27,23 +27,23 @@ STRATEJI_MAP = {
 
     # --- 🏗️ ENDÜSTRİYEL METALLER (Senin İsteklerin) ---
     "HG=F":  {"Ad": "Bakır",           "ETF": "CPER"},
-    "NI=F":  {"Ad": "Nikel",           "ETF": "NIKL"}, # Nikel ETF'i
-    "ALI=F": {"Ad": "Alüminyum",       "ETF": "AA"},   # JJU kapandığı için Alcoa (AA) hissesini koyduk
+    "NI=F":  {"Ad": "Nikel",           "ETF": "NIKL"}, 
+    "ALI=F": {"Ad": "Alüminyum",       "ETF": "AA"},   
 
     # --- 🛢️ ENERJİ ---
     "CL=F": {"Ad": "Ham Petrol (WTI)", "ETF": "USO"},
-    "BZ=F": {"Ad": "Brent Petrol",     "ETF": "BNO"},  # Brent eklendi
+    "BZ=F": {"Ad": "Brent Petrol",     "ETF": "BNO"},  
     "NG=F": {"Ad": "Doğalgaz",         "ETF": "UNG"},
-    "RB=F": {"Ad": "Benzin",           "ETF": "UGA"},  # Benzin eklendi
+    "RB=F": {"Ad": "Benzin",           "ETF": "UGA"},  
 
     # --- 🌾 TARIM & GIDA (Softs) ---
     "ZC=F": {"Ad": "Mısır",       "ETF": "CORN"},
     "ZW=F": {"Ad": "Buğday",      "ETF": "WEAT"},
     "ZS=F": {"Ad": "Soya",        "ETF": "SOYB"},
-    "KC=F": {"Ad": "Kahve",       "ETF": "JO"},    # Kahve eklendi
-    "SB=F": {"Ad": "Şeker",       "ETF": "CANE"},  # Şeker eklendi
-    "CC=F": {"Ad": "Kakao",       "ETF": "NIB"},   # Kakao eklendi
-    "CT=F": {"Ad": "Pamuk",       "ETF": "BAL"}    # Pamuk eklendi
+    "KC=F": {"Ad": "Kahve",       "ETF": "JO"},    
+    "SB=F": {"Ad": "Şeker",       "ETF": "CANE"},  
+    "CC=F": {"Ad": "Kakao",       "ETF": "NIB"},   
+    "CT=F": {"Ad": "Pamuk",       "ETF": "BAL"}    
 }
 
 bot = TelegramBot()
@@ -61,23 +61,47 @@ def hafiza_kaydet(veri):
     with open(HAFIZA_DOSYASI, "w") as f:
         json.dump(veri, f)
 
-def fiyat_getir(sembol):
+def piyasa_verisi_al(sembol):
+    """
+    Yahoo Finance'den hem fiyatı, hem değişimi hem de market durumunu çeker.
+    Web sitesindeki verilerle eşleşmesi için .info kullanır.
+    """
     try:
         ticker = yf.Ticker(sembol)
-        # 5 Günlük veri çekiyoruz ki "Data Yok" hatası almayalım ve önceki günü bilelim
-        data = ticker.history(period="5d")
-        if data.empty: return None, 0.0
+        # .info verisi en detaylısıdır (marketState içerir)
+        bilgi = ticker.info 
         
-        son_fiyat = data['Close'].iloc[-1]
-        gunluk_degisim = 0.0
+        # Fiyatı ve Önceki Kapanışı al
+        fiyat = bilgi.get('regularMarketPrice')
+        
+        # Eğer info boş dönerse (bazen olur), fast_info'ya geç (Yedek Plan)
+        if fiyat is None:
+            fiyat = ticker.fast_info.last_price
+            onceki_kapanis = ticker.fast_info.previous_close
+        else:
+            onceki_kapanis = bilgi.get('regularMarketPreviousClose')
+            
+        # Günlük Değişimi Hesapla (Yahoo Mantığı: (Son - Dün) / Dün)
+        if onceki_kapanis and onceki_kapanis > 0:
+            gunluk_degisim = ((fiyat - onceki_kapanis) / onceki_kapanis) * 100
+        else:
+            gunluk_degisim = 0.0
 
-        # Günlük değişimi hesaplamak için dünkü kapanışa ihtiyacımız var
-        if len(data) >= 2:
-            onceki_kapanis = data['Close'].iloc[-2]
-            gunluk_degisim = ((son_fiyat - onceki_kapanis) / onceki_kapanis) * 100
+        # Piyasa Durumu (Açık mı Kapalı mı?)
+        durum_kodu = bilgi.get('marketState', 'CLOSED')
         
-        return son_fiyat, gunluk_degisim
-    except: return None, 0.0
+        if durum_kodu == "REGULAR":
+            ikon = "🟢"
+            metin = "AÇIK"
+        else:
+            ikon = "⚪"
+            metin = "KAPALI"
+            
+        return fiyat, gunluk_degisim, ikon, metin
+
+    except Exception as e:
+        # Hata durumunda veri yok dön
+        return None, 0.0, "⚪", "VERİ YOK"
 
 def rsi_hesapla(sembol):
     try:
@@ -94,7 +118,7 @@ def rsi_hesapla(sembol):
     except: return 50
 
 def main():
-    print("🌍 Bot Başlatıldı (Dev Kadro & Hileli Mod)...")
+    print("🌍 Bot Başlatıldı (Dev Kadro, Yahoo Senkronize & Market Durumu)...")
     
     hafiza = hafiza_yukle()
     yeni_hafiza = hafiza.copy()
@@ -102,11 +126,10 @@ def main():
     su_an = time.time()
 
     for kaynak_kodu, detay in STRATEJI_MAP.items():
-        # Artık hem fiyatı hem de günlük değişimi alıyoruz
-        guncel_fiyat, gunluk_degisim_orani = fiyat_getir(kaynak_kodu)
+        # Emtia için verileri çek
+        guncel_fiyat, gunluk_degisim_orani, emtia_ikon, emtia_durum = piyasa_verisi_al(kaynak_kodu)
         
         if guncel_fiyat is None: 
-            # Veri yoksa sessizce geç, logu kirletme
             continue
 
         eski_veri = hafiza.get(kaynak_kodu, {})
@@ -118,16 +141,17 @@ def main():
             eski_veri = {"son_fiyat": eski_fiyat}
             print(f"😈 İlk Tanışma Hilesi: {detay['Ad']}")
 
-        # Hesaplama (Hafızadaki fiyata göre değişim)
+        # Botun kendi referansına göre anlık hareket hesaplaması
         degisim_yuzdesi = ((guncel_fiyat - eski_fiyat) / eski_fiyat) * 100
         
-        # Sadece büyük hareketleri ekrana yaz (Buradaki değişim hafızadaki değişimi baz alır)
+        # Sadece büyük hareketleri ekrana yaz
         if abs(degisim_yuzdesi) >= ESIK_DEGERI:
             print(f"🔥 {detay['Ad']}: %{degisim_yuzdesi:.2f}")
 
             etf_kodu = detay["ETF"]
-            # ETF için günlük değişimi kullanmayacağız ama fonksiyon yapısı değiştiği için unpack ediyoruz
-            etf_fiyat, _ = fiyat_getir(etf_kodu) 
+            
+            # ETF Verilerini Çek (Fiyat, Yüzde, Durum)
+            etf_fiyat, etf_degisim, etf_ikon, etf_durum = piyasa_verisi_al(etf_kodu)
             etf_rsi = rsi_hesapla(etf_kodu)
             
             paket = {
@@ -135,7 +159,7 @@ def main():
                 "emtia_adi": f"{detay['Ad']}",
                 "sembol": etf_kodu,
                 "emtia_degisim": round(degisim_yuzdesi, 2),
-                "hisse_degisim": "---",
+                "hisse_degisim": round(etf_degisim, 2),
                 "fiyat": round(etf_fiyat, 2) if etf_fiyat else "Veri Yok",
                 "rsi": round(etf_rsi, 0),
                 "trend": "YÜKSELİŞ" if degisim_yuzdesi > 0 else "DÜŞÜŞ"
@@ -146,30 +170,32 @@ def main():
 
             baslik_ikon = "🚨 BİLGİLENDİRME" if abs(degisim_yuzdesi) > 2.0 else "🔔 HAREKET"
             
+            # Mesaj Formatı (Seçenek A uygulandı: Kapalı olsa bile yüzdeyi gösteriyoruz)
             mesaj = (
-                f"<b>{baslik_ikon}: {detay['Ad']} ({kaynak_kodu})</b>\n\n"
+                f"<b>{baslik_ikon}: {detay['Ad']} ({kaynak_kodu})</b>\n"
+                f"Durum: {emtia_ikon} {emtia_durum}\n\n"
                 f"📊 <b>Anlık Hareket:</b> %{paket['emtia_degisim']}\n"
                 f"📅 <b>Günlük Değişim:</b> %{gunluk_degisim_orani:.2f}\n"
                 f"💵 <b>Fiyat:</b> {guncel_fiyat:.2f}\n"
-                f"💰 <b>ETF/Hisse:</b> {etf_kodu} ({paket['fiyat']}$)\n"
                 f"------------------------\n"
-                f"📈 <b>RSI:</b> {paket['rsi']}\n"
+                f"💰 <b>ETF/Hisse:</b> {etf_kodu}\n"
+                f"🏷️ <b>ETF Fiyat:</b> {paket['fiyat']}$ ({etf_ikon} {etf_durum})\n"
+                f"📉 <b>ETF Günlük:</b> %{paket['hisse_degisim']}\n"
+                f"📈 <b>RSI:</b> {paket['rsi']}\n\n"
                 f"🤖 <b>AI:</b> {ai_sonuc}"
             )
             
             bot.gonder(mesaj)
             print(f"✅ MESAJ ATILDI: {detay['Ad']}")
             
-            # Yeni fiyatı hafızaya yaz (Referans güncelle)
+            # Yeni fiyatı hafızaya yaz
             yeni_hafiza[kaynak_kodu] = {"son_fiyat": guncel_fiyat, "son_mesaj_zamani": su_an}
             degisiklik_var_mi = True
         
         else:
-            # Hareket küçükse eski referansı koru
             if eski_fiyat is not None:
                 yeni_hafiza[kaynak_kodu] = eski_veri
             else:
-                # Hileli modda buraya düşmez ama yine de güvenli kayıt
                 yeni_hafiza[kaynak_kodu] = {"son_fiyat": guncel_fiyat, "son_mesaj_zamani": su_an}
                 degisiklik_var_mi = True
 
