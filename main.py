@@ -68,13 +68,8 @@ def hafiza_kaydet(veri):
         json.dump(veri, f)
 
 def piyasa_verisi_al(sembol):
-    """
-    Yahoo Finance'den fiyat ve piyasa durumunu çeker.
-    GitHub'da güvenilir çalışması için period='5d' kullanıyoruz.
-    """
     try:
         ticker = yf.Ticker(sembol)
-        # Veri yok hatasını aşmak için 5 günlük veri çekiyoruz
         hist = ticker.history(period="5d")
         
         if hist.empty:
@@ -82,15 +77,12 @@ def piyasa_verisi_al(sembol):
 
         fiyat = hist['Close'].iloc[-1]
         
-        # Günlük Değişimi Hesapla
         if len(hist) >= 2:
             onceki_kapanis = hist['Close'].iloc[-2]
             gunluk_degisim = ((fiyat - onceki_kapanis) / onceki_kapanis) * 100
         else:
             gunluk_degisim = 0.0
 
-        # Piyasa durumu (Basit kontrol)
-        # Bu kısım GitHub'da bazen yavaşlatabilir, basitleştirdik.
         metin = "AKTİF"
         ikon = "🟢"
             
@@ -121,7 +113,6 @@ def main():
     degisiklik_var_mi = False
     su_an = time.time()
 
-    # Strateji haritasını dönüyoruz
     for strateji_adi, detay in STRATEJI_MAP.items():
         
         # 1. ADIM: SİNYAL (FUTURES) VERİSİNİ ÇEK
@@ -131,7 +122,6 @@ def main():
         if guncel_sinyal_fiyat is None: 
             continue
 
-        # Hafızada bu sinyalin (örn GC=F) eski fiyatı var mı?
         eski_veri = hafiza.get(sinyal_kodu, {})
         eski_sinyal_fiyat = eski_veri.get("son_fiyat")
 
@@ -140,22 +130,17 @@ def main():
             eski_sinyal_fiyat = guncel_sinyal_fiyat * 0.95 
             print(f"😈 İlk Tanışma Hilesi Devrede: {sinyal_kodu} -> {strateji_adi}")
 
-        # Hareket Hesapla (Botun gördüğü son fiyata göre)
         degisim_yuzdesi = ((guncel_sinyal_fiyat - eski_sinyal_fiyat) / eski_sinyal_fiyat) * 100
         
-        # Ekrana log bas (GitHub loglarında görmek için)
         if abs(degisim_yuzdesi) > 0.1:
             print(f"🔍 {strateji_adi} ({sinyal_kodu}): %{degisim_yuzdesi:.2f}")
 
-        # 🔥 HAREKET EŞİĞİ GEÇİLDİ Mİ?
         if abs(degisim_yuzdesi) >= ESIK_DEGERI:
             
-            # 2. ADIM: HEDEF (ETF/BYF) VERİSİNİ ÇEK
             hedef_kodu = detay["Hedef_Kod"]
             hedef_fiyat, hedef_gunluk_degisim, hedef_ikon, hedef_durum = piyasa_verisi_al(hedef_kodu)
             hedef_rsi = rsi_hesapla(hedef_kodu)
             
-            # AI Paketini Hazırla
             paket = {
                 "tur": "ARBITRAJ", 
                 "emtia_adi": detay['Hedef_Ad'],
@@ -171,7 +156,7 @@ def main():
 
             baslik_ikon = "🚀 FIRSAT" if degisim_yuzdesi > 0 else "🔻 DİKKAT"
             
-            # Mesajı Oluştur
+            # ✅ DÜZELTİLEN KISIM BURASI:
             mesaj = (
                 f"<b>{baslik_ikon}: SİNYAL YAKALANDI!</b>\n"
                 f"🌍 <b>Global ({sinyal_kodu}):</b> %{paket['global_degisim']}\n"
@@ -180,28 +165,20 @@ def main():
                 f"🏷️ <b>Kod:</b> {hedef_kodu}\n"
                 f"💵 <b>Fiyat:</b> {paket['hedef_fiyat']}\n"
                 f"📈 <b>RSI:</b> {paket['hedef_rsi']}\n\n"
-                f"🧠 <b>Analiz:</b>\n{ai_yorum}" # Not: ai_brain.py'den gelen değişken adı ai_sonuc
+                f"🧠 <b>Analiz:</b>\n{ai_sonuc}" 
             )
-            # Düzeltme: ai_yorum yukarıda ai_sonuc olarak tanımlandı
-            mesaj = mesaj.replace("ai_yorum", str(ai_sonuc)) 
             
             bot.gonder(mesaj)
             print(f"✅ MESAJ ATILDI: {strateji_adi}")
             
-            # 3. ADIM: SİNYAL FİYATINI GÜNCELLE
-            # Dikkat: Aynı sinyali (örn GC=F) kullanan birden fazla strateji olabilir.
-            # Hepsi tetiklendikten sonra hafızadaki sinyal fiyatı güncellenmeli.
             yeni_hafiza[sinyal_kodu] = {"son_fiyat": guncel_sinyal_fiyat, "son_mesaj_zamani": su_an}
             degisiklik_var_mi = True
         
         else:
-            # Hareket yoksa eski veriyi koru veya ilk kez görüyorsak kaydet
             if eski_sinyal_fiyat is not None:
-                # Eğer yeni hafızada zaten güncellenmediyse eskiyi koru
                 if sinyal_kodu not in yeni_hafiza: 
                     yeni_hafiza[sinyal_kodu] = eski_veri
             else:
-                # İlk görüş (Hile modu çalışsa bile buraya düşebilir)
                 yeni_hafiza[sinyal_kodu] = {"son_fiyat": guncel_sinyal_fiyat, "son_mesaj_zamani": su_an}
                 degisiklik_var_mi = True
 
