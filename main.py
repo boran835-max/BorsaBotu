@@ -12,44 +12,29 @@ from notifier import TelegramBot
 # ⚙️ AYARLAR
 # ==============================================================================
 HAFIZA_DOSYASI = "hafiza.json"
-ESIK_DEGERI = 0.8  # %0.8 hareket olunca haber ver
+ESIK_DEGERI = 0.8  # %0.8 anlık hareket olunca haber ver
 
 # ==============================================================================
-# 🎯 1:1 KORELASYON HARİTASI (TR & US BİRLİKTE)
+# 🎯 FULL 1:1 STRATEJİ (EMTİA + TEKNOLOJİ)
 # ==============================================================================
 STRATEJI_MAP = {
-    # --- 🥇 ALTIN (ÇİFT YÖNLÜ) ---
-    "ALTIN_TR": { 
-        "Sinyal": "GC=F", "Hedef_Kod": "GLDTR.IS", "Hedef_Ad": "QNB Altın BYF (TR)", "Piyasa": "🇹🇷 BIST"
-    },
-    "ALTIN_US": { 
-        "Sinyal": "GC=F", "Hedef_Kod": "GLD",      "Hedef_Ad": "SPDR Gold Shares (ABD)", "Piyasa": "🇺🇸 ABD"
-    },
+    # --- 🥇 EMTİALAR (Tablodaki Liste) ---
+    "ALTIN_TR":  {"Sinyal": "GC=F", "Hedef": "GLDTR.IS", "Ad": "Altın (TR)",   "Piyasa": "BIST"},
+    "ALTIN_US":  {"Sinyal": "GC=F", "Hedef": "GLD",      "Ad": "Altın (ABD)",  "Piyasa": "ABD"},
+    
+    "GUMUS_TR":  {"Sinyal": "SI=F", "Hedef": "GMSTR.IS", "Ad": "Gümüş (TR)",   "Piyasa": "BIST"},
+    "GUMUS_US":  {"Sinyal": "SI=F", "Hedef": "SLV",      "Ad": "Gümüş (ABD)",  "Piyasa": "ABD"},
+    
+    "PETROL_US": {"Sinyal": "CL=F", "Hedef": "USO",      "Ad": "Petrol",       "Piyasa": "ABD"},
+    "GAZ_US":    {"Sinyal": "NG=F", "Hedef": "UNG",      "Ad": "Doğalgaz",     "Piyasa": "ABD"},
+    "BAKIR_US":  {"Sinyal": "HG=F", "Hedef": "CPER",     "Ad": "Bakır",        "Piyasa": "ABD"},
+    "MISIR_US":  {"Sinyal": "ZC=F", "Hedef": "CORN",     "Ad": "Mısır",        "Piyasa": "ABD"},
+    "BUGDAY_US": {"Sinyal": "ZW=F", "Hedef": "WEAT",     "Ad": "Buğday",       "Piyasa": "ABD"},
 
-    # --- 🥈 GÜMÜŞ (ÇİFT YÖNLÜ) ---
-    "GUMUS_TR": { 
-        "Sinyal": "SI=F", "Hedef_Kod": "GMSTR.IS", "Hedef_Ad": "QNB Gümüş BYF (TR)", "Piyasa": "🇹🇷 BIST"
-    },
-    "GUMUS_US": { 
-        "Sinyal": "SI=F", "Hedef_Kod": "SLV",      "Hedef_Ad": "iShares Silver Trust (ABD)", "Piyasa": "🇺🇸 ABD"
-    },
-
-    # --- 🇺🇸 SADECE ABD OLANLAR (TR KARŞILIĞI YOK) ---
-    "PETROL_US": { 
-        "Sinyal": "CL=F", "Hedef_Kod": "USO", "Hedef_Ad": "US Oil Fund", "Piyasa": "🇺🇸 ABD"
-    },
-    "DOGALGAZ_US": { 
-        "Sinyal": "NG=F", "Hedef_Kod": "UNG", "Hedef_Ad": "US Natural Gas Fund", "Piyasa": "🇺🇸 ABD"
-    },
-    "BAKIR_US": { 
-        "Sinyal": "HG=F", "Hedef_Kod": "CPER", "Hedef_Ad": "US Copper Index", "Piyasa": "🇺🇸 ABD"
-    },
-    "MISIR_US": { 
-        "Sinyal": "ZC=F", "Hedef_Kod": "CORN", "Hedef_Ad": "Teucrium Corn Fund", "Piyasa": "🇺🇸 ABD"
-    },
-    "BUGDAY_US": { 
-        "Sinyal": "ZW=F", "Hedef_Kod": "WEAT", "Hedef_Ad": "Teucrium Wheat Fund", "Piyasa": "🇺🇸 ABD"
-    }
+    # --- 💻 TEKNOLOJİ & ENDEKSLER (Forvet Hattı) ---
+    "NASDAQ_TR": {"Sinyal": "NQ=F", "Hedef": "NASDQQ.IS","Ad": "Nasdaq (TR)", "Piyasa": "BIST"},
+    "NASDAQ_US": {"Sinyal": "NQ=F", "Hedef": "QQQ",      "Ad": "Nasdaq (ABD)", "Piyasa": "ABD"},
+    "SP500_US":  {"Sinyal": "ES=F", "Hedef": "SPY",      "Ad": "S&P 500",      "Piyasa": "ABD"}
 }
 
 bot = TelegramBot()
@@ -68,6 +53,9 @@ def hafiza_kaydet(veri):
         json.dump(veri, f)
 
 def piyasa_verisi_al(sembol):
+    """
+    Hem anlık fiyatı hem de günlük % değişimini çeker.
+    """
     try:
         ticker = yf.Ticker(sembol)
         hist = ticker.history(period="5d")
@@ -77,16 +65,18 @@ def piyasa_verisi_al(sembol):
 
         fiyat = hist['Close'].iloc[-1]
         
+        # Günlük Değişim Hesabı (Dünkü kapanışa göre)
         if len(hist) >= 2:
             onceki_kapanis = hist['Close'].iloc[-2]
             gunluk_degisim = ((fiyat - onceki_kapanis) / onceki_kapanis) * 100
         else:
             gunluk_degisim = 0.0
 
-        metin = "AKTİF"
-        ikon = "🟢"
+        # Piyasa Durumu (Basit simülasyon)
+        durum_ikon = "🟢" # GitHub'da canlı veri çekebiliyorsak açıktır varsayımı
+        durum_metin = "AÇIK"
             
-        return fiyat, gunluk_degisim, ikon, metin
+        return fiyat, gunluk_degisim, durum_ikon, durum_metin
 
     except Exception as e:
         return None, 0.0, "⚪", "HATA"
@@ -106,80 +96,94 @@ def rsi_hesapla(sembol):
     except: return 50
 
 def main():
-    print("🌍 Bot Başlatıldı (GitHub Modu - 1:1 Strateji)...")
+    print("🌍 Bot Başlatıldı (Görsel Formatlı Mod)...")
     
     hafiza = hafiza_yukle()
     yeni_hafiza = hafiza.copy()
     degisiklik_var_mi = False
     su_an = time.time()
 
-    for strateji_adi, detay in STRATEJI_MAP.items():
+    for key, detay in STRATEJI_MAP.items():
         
-        # 1. ADIM: SİNYAL (FUTURES) VERİSİNİ ÇEK
-        sinyal_kodu = detay["Sinyal"]
-        guncel_sinyal_fiyat, sinyal_gunluk_degisim, sinyal_ikon, _ = piyasa_verisi_al(sinyal_kodu)
+        # 1. SİNYAL (FUTURES) VERİSİ
+        sinyal_kod = detay["Sinyal"]
+        sinyal_fiyat, sinyal_gunluk, sinyal_ikon, sinyal_durum = piyasa_verisi_al(sinyal_kod)
         
-        if guncel_sinyal_fiyat is None: 
-            continue
+        if sinyal_fiyat is None: continue
 
-        eski_veri = hafiza.get(sinyal_kodu, {})
+        # Hafıza Kontrolü (Anlık Hareket İçin)
+        eski_veri = hafiza.get(sinyal_kod, {})
         eski_sinyal_fiyat = eski_veri.get("son_fiyat")
 
-        # 😈 HİLE MODU: İlk kez görüyorsak %5 düşükmüş gibi davran
+        # Hile Modu (İlk çalışmada tetiklensin diye)
         if eski_sinyal_fiyat is None:
-            eski_sinyal_fiyat = guncel_sinyal_fiyat * 0.95 
-            print(f"😈 İlk Tanışma Hilesi Devrede: {sinyal_kodu} -> {strateji_adi}")
+            eski_sinyal_fiyat = sinyal_fiyat * 0.95 
+            print(f"😈 İlk Tanışma: {key}")
 
-        degisim_yuzdesi = ((guncel_sinyal_fiyat - eski_sinyal_fiyat) / eski_sinyal_fiyat) * 100
+        # ANLIK HAREKET (Son kontrolden beri ne oldu?)
+        anlik_hareket = ((sinyal_fiyat - eski_sinyal_fiyat) / eski_sinyal_fiyat) * 100
         
-        if abs(degisim_yuzdesi) > 0.1:
-            print(f"🔍 {strateji_adi} ({sinyal_kodu}): %{degisim_yuzdesi:.2f}")
+        # Loglama
+        if abs(anlik_hareket) > 0.1:
+            print(f"🔍 {key}: Anlık %{anlik_hareket:.2f} | Günlük %{sinyal_gunluk:.2f}")
 
-        if abs(degisim_yuzdesi) >= ESIK_DEGERI:
+        # 🔥 EŞİK GEÇİLDİ Mİ?
+        if abs(anlik_hareket) >= ESIK_DEGERI:
             
-            hedef_kodu = detay["Hedef_Kod"]
-            hedef_fiyat, hedef_gunluk_degisim, hedef_ikon, hedef_durum = piyasa_verisi_al(hedef_kodu)
-            hedef_rsi = rsi_hesapla(hedef_kodu)
+            # 2. HEDEF (ETF) VERİSİ
+            hedef_kod = detay["Hedef"]
+            hedef_fiyat, hedef_gunluk, hedef_ikon, hedef_durum = piyasa_verisi_al(hedef_kod)
+            hedef_rsi = rsi_hesapla(hedef_kod)
             
+            # AI Analizi
             paket = {
-                "tur": "ARBITRAJ", 
-                "emtia_adi": detay['Hedef_Ad'],
-                "sembol": hedef_kodu,
-                "global_degisim": round(degisim_yuzdesi, 2),
-                "hedef_fiyat": round(hedef_fiyat, 2) if hedef_fiyat else "Veri Yok",
-                "hedef_rsi": round(hedef_rsi, 0),
-                "soru": f"Global sinyal ({sinyal_kodu}) %{degisim_yuzdesi:.2f} hareket etti. {detay['Piyasa']} piyasasındaki {detay['Hedef_Ad']} ({hedef_kodu}) için fırsat var mı?"
+                "tur": "ARBITRAJ",
+                "emtia_adi": detay['Ad'],
+                "sembol": hedef_kod,
+                "anlik_hareket": round(anlik_hareket, 2),
+                "gunluk_degisim": round(sinyal_gunluk, 2),
+                "hedef_fiyat": round(hedef_fiyat, 2) if hedef_fiyat else 0,
+                "hedef_gunluk": round(hedef_gunluk, 2),
+                "rsi": round(hedef_rsi, 0),
+                "soru": f"Global sinyal ({sinyal_kod}) anlık %{anlik_hareket:.2f} hareket etti. Hedef varlık {hedef_kod} durumu: Fiyat {hedef_fiyat}, RSI {hedef_rsi}. Fırsat var mı?"
             }
             
             try: ai_sonuc = ai.yorumla(paket)
-            except: ai_sonuc = ".."
+            except: ai_sonuc = "Analiz yapılamadı."
 
-            baslik_ikon = "🚀 FIRSAT" if degisim_yuzdesi > 0 else "🔻 DİKKAT"
-            
-            # ✅ DÜZELTİLEN KISIM BURASI:
+            # İkon Seçimi
+            baslik_ikon = "🔔" 
+            if abs(anlik_hareket) > 2.0: baslik_ikon = "🚨"
+
+            # ✅ İŞTE İSTEDİĞİN GÖRSEL FORMAT
             mesaj = (
-                f"<b>{baslik_ikon}: SİNYAL YAKALANDI!</b>\n"
-                f"🌍 <b>Global ({sinyal_kodu}):</b> %{paket['global_degisim']}\n"
+                f"{baslik_ikon} <b>HAREKET: {detay['Ad']} ({sinyal_kod})</b>\n"
+                f"Durum: {sinyal_ikon} {sinyal_durum}\n\n"
+                f"📊 <b>Anlık Hareket:</b> %{anlik_hareket:.2f}\n"
+                f"📅 <b>Günlük Değişim:</b> %{sinyal_gunluk:.2f}\n"
+                f"💵 <b>Fiyat:</b> {sinyal_fiyat:.2f}\n"
                 f"------------------------\n"
-                f"{detay['Piyasa']} <b>Hedef:</b> {detay['Hedef_Ad']}\n"
-                f"🏷️ <b>Kod:</b> {hedef_kodu}\n"
-                f"💵 <b>Fiyat:</b> {paket['hedef_fiyat']}\n"
-                f"📈 <b>RSI:</b> {paket['hedef_rsi']}\n\n"
-                f"🧠 <b>Analiz:</b>\n{ai_sonuc}" 
+                f"💰 <b>ETF/Hisse:</b> {hedef_kod}\n"
+                f"🏷️ <b>ETF Fiyat:</b> {hedef_fiyat}$ ({hedef_ikon} {hedef_durum})\n"
+                f"📉 <b>ETF Günlük:</b> %{hedef_gunluk:.2f}\n"
+                f"📈 <b>RSI:</b> {hedef_rsi}\n\n"
+                f"🤖 <b>AI:</b> {ai_sonuc}"
             )
             
             bot.gonder(mesaj)
-            print(f"✅ MESAJ ATILDI: {strateji_adi}")
+            print(f"✅ MESAJ ATILDI: {key}")
             
-            yeni_hafiza[sinyal_kodu] = {"son_fiyat": guncel_sinyal_fiyat, "son_mesaj_zamani": su_an}
+            # Hafıza Güncelle
+            yeni_hafiza[sinyal_kod] = {"son_fiyat": sinyal_fiyat, "son_mesaj_zamani": su_an}
             degisiklik_var_mi = True
         
         else:
+            # Hareket yoksa eskiyi koru
             if eski_sinyal_fiyat is not None:
-                if sinyal_kodu not in yeni_hafiza: 
-                    yeni_hafiza[sinyal_kodu] = eski_veri
+                if sinyal_kod not in yeni_hafiza:
+                    yeni_hafiza[sinyal_kod] = eski_veri
             else:
-                yeni_hafiza[sinyal_kodu] = {"son_fiyat": guncel_sinyal_fiyat, "son_mesaj_zamani": su_an}
+                yeni_hafiza[sinyal_kod] = {"son_fiyat": sinyal_fiyat, "son_mesaj_zamani": su_an}
                 degisiklik_var_mi = True
 
     if degisiklik_var_mi:
