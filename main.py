@@ -5,6 +5,7 @@ import time
 import os
 import json 
 import yfinance as yf
+from datetime import datetime, timedelta, timezone
 from ai_brain import AITrader
 from notifier import TelegramBot
 
@@ -12,23 +13,25 @@ from notifier import TelegramBot
 # ⚙️ AYARLAR
 # ==============================================================================
 HAFIZA_DOSYASI = "hafiza.json"
-ESIK_DEGERI = 0.8  # %0.8 anlık hareket olunca haber ver
+ESIK_DEGERI = 0.8 
 
 STRATEJI_MAP = {
-    # --- 🥇 EMTİALAR ---
+    # --- 🥇 DEĞERLİ METALLER ---
     "ALTIN_TR":  {"Sinyal": "GC=F", "Hedef": "GLDTR.IS", "Ad": "Altın (TR)",   "Piyasa": "BIST"},
     "ALTIN_US":  {"Sinyal": "GC=F", "Hedef": "GLD",      "Ad": "Altın (ABD)",  "Piyasa": "ABD"},
-    
     "GUMUS_TR":  {"Sinyal": "SI=F", "Hedef": "GMSTR.IS", "Ad": "Gümüş (TR)",   "Piyasa": "BIST"},
     "GUMUS_US":  {"Sinyal": "SI=F", "Hedef": "SLV",      "Ad": "Gümüş (ABD)",  "Piyasa": "ABD"},
+    "PLATIN_US":   {"Sinyal": "PL=F", "Hedef": "PPLT", "Ad": "Platin",   "Piyasa": "ABD"},
+    "PALADYUM_US": {"Sinyal": "PA=F", "Hedef": "PALL", "Ad": "Paladyum", "Piyasa": "ABD"},
     
-    "PETROL_US": {"Sinyal": "CL=F", "Hedef": "USO",      "Ad": "Petrol",       "Piyasa": "ABD"},
-    "GAZ_US":    {"Sinyal": "NG=F", "Hedef": "UNG",      "Ad": "Doğalgaz",     "Piyasa": "ABD"},
-    "BAKIR_US":  {"Sinyal": "HG=F", "Hedef": "CPER",     "Ad": "Bakır",        "Piyasa": "ABD"},
-    "MISIR_US":  {"Sinyal": "ZC=F", "Hedef": "CORN",     "Ad": "Mısır",        "Piyasa": "ABD"},
-    "BUGDAY_US": {"Sinyal": "ZW=F", "Hedef": "WEAT",     "Ad": "Buğday",       "Piyasa": "ABD"},
+    # --- 🛢️ ENERJİ & TARIM ---
+    "PETROL_US": {"Sinyal": "CL=F", "Hedef": "USO",  "Ad": "Petrol",   "Piyasa": "ABD"},
+    "GAZ_US":    {"Sinyal": "NG=F", "Hedef": "UNG",  "Ad": "Doğalgaz", "Piyasa": "ABD"},
+    "BAKIR_US":  {"Sinyal": "HG=F", "Hedef": "CPER", "Ad": "Bakır",    "Piyasa": "ABD"},
+    "MISIR_US":  {"Sinyal": "ZC=F", "Hedef": "CORN", "Ad": "Mısır",    "Piyasa": "ABD"},
+    "BUGDAY_US": {"Sinyal": "ZW=F", "Hedef": "WEAT", "Ad": "Buğday",   "Piyasa": "ABD"},
 
-    # --- 💻 TEKNOLOJİ & ENDEKSLER ---
+    # --- 💻 TEKNOLOJİ ---
     "NASDAQ_TR": {"Sinyal": "NQ=F", "Hedef": "NASDQQ.IS","Ad": "Nasdaq (TR)", "Piyasa": "BIST"},
     "NASDAQ_US": {"Sinyal": "NQ=F", "Hedef": "QQQ",      "Ad": "Nasdaq (ABD)", "Piyasa": "ABD"},
     "SP500_US":  {"Sinyal": "ES=F", "Hedef": "SPY",      "Ad": "S&P 500",      "Piyasa": "ABD"}
@@ -50,76 +53,58 @@ def hafiza_kaydet(veri):
         json.dump(veri, f)
 
 def istatistik_hesapla(hist_data):
-    """
-    Son 100 güne bakar:
-    1. Ortalama kaç gün üst üste düşmüş?
-    2. Şu an kaçıncı düşüş gününde?
-    """
     try:
-        # Yüzdelik değişimleri al
         returns = hist_data['Close'].pct_change().dropna()
-        # Son 100 işlem gününü al
         last_100 = returns.tail(100)
-        
         negatif_seriler = []
         gecici_seri = 0
-        
-        # 1. Geçmiş Serileri Hesapla
         for degisim in last_100:
-            if degisim < 0:
-                gecici_seri += 1
+            if degisim < 0: gecici_seri += 1
             else:
-                if gecici_seri > 0:
-                    negatif_seriler.append(gecici_seri)
-                gecici_seri = 0 # Sıfırla
+                if gecici_seri > 0: negatif_seriler.append(gecici_seri)
+                gecici_seri = 0
         
-        # Ortalama Negatif Seri Uzunluğu
-        if len(negatif_seriler) > 0:
-            ort_negatif = sum(negatif_seriler) / len(negatif_seriler)
-        else:
-            ort_negatif = 0
-            
-        # 2. Mevcut Seriyi Hesapla (Sondan geriye say)
+        ort_negatif = sum(negatif_seriler) / len(negatif_seriler) if negatif_seriler else 0
         mevcut_seri = 0
         for degisim in reversed(last_100):
-            if degisim < 0:
-                mevcut_seri += 1
-            else:
-                break
-                
+            if degisim < 0: mevcut_seri += 1
+            else: break     
         return f"{ort_negatif:.2f}", mevcut_seri
-        
-    except:
-        return "0.00", 0
+    except: return "0.00", 0
 
 def piyasa_verisi_al(sembol):
     try:
         ticker = yf.Ticker(sembol)
-        # İstatistik için 6 aylık veri çekiyoruz (100 günü garanti etmek için)
         hist = ticker.history(period="6mo")
-        
-        if hist.empty:
-            return None, 0.0, "⚪", "VERİ YOK", "0.00", 0
+        if hist.empty: return None, 0.0, "⚪", "VERİ YOK", "0.00", 0
 
         fiyat = hist['Close'].iloc[-1]
         
-        # Günlük Değişim
         if len(hist) >= 2:
             onceki_kapanis = hist['Close'].iloc[-2]
             gunluk_degisim = ((fiyat - onceki_kapanis) / onceki_kapanis) * 100
-        else:
-            gunluk_degisim = 0.0
+        else: gunluk_degisim = 0.0
 
-        durum_ikon = "🟢" 
-        durum_metin = "AÇIK"
+        # 🔥 PİYASA DURUMU KONTROLÜ
+        son_veri_zamani = hist.index[-1].to_pydatetime()
+        if son_veri_zamani.tzinfo is not None:
+            son_veri_zamani = son_veri_zamani.astimezone(timezone.utc).replace(tzinfo=None)
         
-        # 🔥 YENİ: İstatistik Hesapla
+        simdi = datetime.utcnow()
+        fark_dakika = (simdi - son_veri_zamani).total_seconds() / 60
+        
+        # 30 dk tolerans (Gecikmeli veri için)
+        if fark_dakika < 30:
+            durum_ikon = "🟢"
+            durum_metin = "AÇIK"
+        else:
+            durum_ikon = "⚫"
+            durum_metin = "KAPALI"
+
         ort_seri, mevcut_seri = istatistik_hesapla(hist)
-            
         return fiyat, gunluk_degisim, durum_ikon, durum_metin, ort_seri, mevcut_seri
 
-    except Exception as e:
-        return None, 0.0, "⚪", "HATA", "0.00", 0
+    except Exception as e: return None, 0.0, "⚪", "HATA", "0.00", 0
 
 def rsi_hesapla(sembol):
     try:
@@ -136,7 +121,7 @@ def rsi_hesapla(sembol):
     except: return 50
 
 def main():
-    print("🌍 Bot Başlatıldı (İstatistik & Mean Reversion Modu)...")
+    print("🌍 Bot Başlatıldı (Piyasa Saati Korumalı Mod)...")
     
     hafiza = hafiza_yukle()
     yeni_hafiza = hafiza.copy()
@@ -146,7 +131,6 @@ def main():
     for key, detay in STRATEJI_MAP.items():
         
         # 1. SİNYAL (FUTURES)
-        # Sinyal için istatistiğe gerek yok, _ ile geçiyoruz
         sinyal_kod = detay["Sinyal"]
         sinyal_fiyat, sinyal_gunluk, sinyal_ikon, sinyal_durum, _, _ = piyasa_verisi_al(sinyal_kod)
         
@@ -162,22 +146,26 @@ def main():
         anlik_hareket = ((sinyal_fiyat - eski_sinyal_fiyat) / eski_sinyal_fiyat) * 100
         
         if abs(anlik_hareket) > 0.1:
-            print(f"🔍 {key}: Anlık %{anlik_hareket:.2f}")
+            print(f"🔍 {key}: Anlık %{anlik_hareket:.2f} ({sinyal_durum})")
 
-        # 🔥 HAREKET VARSA
         if abs(anlik_hareket) >= ESIK_DEGERI:
             
-            # 2. HEDEF (ETF/HISSE) - İstatistik Burada Önemli
+            # 2. HEDEF (ETF/HISSE)
             hedef_kod = detay["Hedef"]
-            # Verileri al (ort_seri ve mevcut_seri eklendi)
             hedef_fiyat, hedef_gunluk, hedef_ikon, hedef_durum, ort_seri, mevcut_seri = piyasa_verisi_al(hedef_kod)
             hedef_rsi = rsi_hesapla(hedef_kod)
             
-            # Formatlama
             fmt_hedef_fiyat = f"{hedef_fiyat:.2f}" if hedef_fiyat else "0.00"
             fmt_rsi = f"{hedef_rsi:.0f}" if hedef_rsi else "50"
             
-            # AI Analiz Paketi
+            # 🔥 AI'YA ÖZEL UYARI
+            uyari_notu = ""
+            etiket_fiyat = "ETF Fiyat"
+            
+            if hedef_durum == "KAPALI":
+                uyari_notu = "(Piyasa KAPALI! ETF fiyatı dünkü kapanışa aittir. Bu fiyat güncel değil, sabah GAP'li açılış bekleniyor.)"
+                etiket_fiyat = "⚠️ Son Kapanış"
+            
             paket = {
                 "tur": "ARBITRAJ",
                 "emtia_adi": detay['Ad'],
@@ -187,10 +175,9 @@ def main():
                 "hedef_fiyat": float(fmt_hedef_fiyat),
                 "hedef_gunluk": round(hedef_gunluk, 2),
                 "rsi": int(float(fmt_rsi)),
-                # İstatistiği AI'ya da söyleyelim
                 "negatif_seri_ort": ort_seri,
                 "mevcut_negatif_seri": mevcut_seri,
-                "soru": f"Global sinyal %{anlik_hareket:.2f} hareketli. Hedef {hedef_kod} son 100 günde ortalama {ort_seri} gün düşüş serisi yapmış, şu an {mevcut_seri}. gündeyiz. Dönüş (Reversal) yakın mı?"
+                "soru": f"Global sinyal {sinyal_kod} %{anlik_hareket:.2f} hareketli. Hedef {hedef_kod} durumu: {hedef_durum}. {uyari_notu} Fiyat: {fmt_hedef_fiyat}. Sabah açılışta ne olur?"
             }
             
             try: ai_sonuc = ai.yorumla(paket)
@@ -199,7 +186,7 @@ def main():
             baslik_ikon = "🔔" 
             if abs(anlik_hareket) > 2.0: baslik_ikon = "🚨"
 
-            # 🛠️ GÖRSEL FORMAT (İstatistik Eklendi)
+            # 📩 MESAJ FORMATI (Kapalıysa Uyarılı)
             mesaj = (
                 f"{baslik_ikon} <b>HAREKET: {detay['Ad']} ({sinyal_kod})</b>\n"
                 f"Durum: {sinyal_ikon} {sinyal_durum}\n\n"
@@ -208,10 +195,10 @@ def main():
                 f"💵 <b>Fiyat:</b> {sinyal_fiyat:.2f}\n"
                 f"------------------------\n"
                 f"💰 <b>ETF/Hisse:</b> {hedef_kod}\n"
-                f"🏷️ <b>ETF Fiyat:</b> {fmt_hedef_fiyat}$ ({hedef_ikon} {hedef_durum})\n"
+                f"🏷️ <b>{etiket_fiyat}:</b> {fmt_hedef_fiyat}$ ({hedef_ikon} {hedef_durum})\n"
                 f"📉 <b>ETF Günlük:</b> %{hedef_gunluk:.2f}\n"
                 f"📈 <b>RSI:</b> {fmt_rsi}\n"
-                f"🛑 <b>Negatif Seri:</b> Ort. {ort_seri} / {mevcut_seri} gün\n\n"
+                f"🛑 <b>Düşüş Serisi:</b> Ort. {ort_seri} / {mevcut_seri} gün\n\n"
                 f"🤖 <b>AI:</b> {ai_sonuc}"
             )
             
